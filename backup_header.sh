@@ -28,15 +28,15 @@ WC=/usr/bin/wc
 ZENITY=/usr/bin/zenity
 
 # Tags
-TAG_HOSTNAME=`${HOSTNAME}`_`${UNAME} -m`
-TAG_KERNEL=`${UNAME} -r`
-TAG_YEARMONTH=`${DATE} +%y%m`
-TAG_DATE_DIR=Backup_${TAG_YEARMONTH}
-TAG_DATE_FILE=`${DATE} +%y%m%d_%H%M%S`
-TAG_TITLE="${TAG_HOSTNAME} - ${TAG_KERNEL}"
+BACKUP_TAG_HOSTNAME=`${HOSTNAME}`_`${UNAME} -m`
+BACKUP_TAG_KERNEL=`${UNAME} -r`
+BACKUP_TAG_YEARMONTH=`${DATE} +%y%m`
+BACKUP_TAG_DIR=Backup_${BACKUP_TAG_YEARMONTH}
+BACKUP_TAG_FILE=`${DATE} +%y%m%d_%H%M%S`
+BACKUP_TAG_TITLE="${BACKUP_TAG_HOSTNAME} - ${BACKUP_TAG_KERNEL}"
 
 # Enable the following line for debugging
-#set -x
+set -x
 
 isRoot()
 {
@@ -76,9 +76,9 @@ backup_Mount()
     BACKUP_TARGET_DIR=${TARGET_MOUNTPOINT}
 
     # Set file specs
-    BACKUP_SPEC_DIR=${BACKUP_TARGET_DIR}/${TAG_DATE_DIR}
-    BACKUP_SPEC_FILE=${BACKUP_SPEC_DIR}/${TAG_DATE_FILE}_${TAG_HOSTNAME}
-    BACKUP_SPEC_CATALOG=${BACKUP_SPEC_DIR}/${TAG_YEARMONTH}_${TAG_HOSTNAME}
+    BACKUP_SPEC_DIR=${BACKUP_TARGET_DIR}/${BACKUP_TAG_DIR}
+    BACKUP_SPEC_FILE=${BACKUP_SPEC_DIR}/${BACKUP_TAG_FILE}_${BACKUP_TAG_HOSTNAME}
+    BACKUP_SPEC_CATALOG=${BACKUP_SPEC_DIR}/${BACKUP_TAG_YEARMONTH}_${BACKUP_TAG_HOSTNAME}
 
     BACKUP_LOG_FILE_DEST=${BACKUP_SPEC_FILE}.log
 
@@ -88,7 +88,7 @@ backup_Mount()
         return 1
     fi
 
-    # TODO: Return value!
+    ## @todo Set return value!
     return 0
 }
 
@@ -125,42 +125,36 @@ backup_Init()
     fi
 
     backup_printInfo "Backup initialized"
-
-    BACKUP_DIRS="
-        /etc
-        /home"
-
-    #
-    # UUIDs by "ls -l /dev/disk/by-uuid":
-    # or do a "sudo blkid":
-    # Iomega Ego 1TB: 4f5cdf0a-baee-484d-a21a-a1a0239a6464
-    #
-    if [ -z "${BACKUP_TARGET_DIR}" ]; then
-        TARGET_DEVICE_UUID="4f5cdf0a-baee-484d-a21a-a1a0239a6464"
-        TARGET_DEVICE=`$LS -l /dev/disk/by-uuid | grep "$TARGET_DEVICE_UUID ->" | sed 's/.*\///'`
-        if [ -n "${TARGET_DEVICE}" ]; then
-            TARGET_MOUNTPOINT=`mount | grep $TARGET_DEVICE | sed 's/.*on //' | sed 's/ .*//'`
-        fi
-
-        backup_Mount
-        if [ $? -ne "0" ]; then
-            return 1
-        fi
-    else
-        ${MKDIR} -p -m 700 ${BACKUP_TARGET_DIR}
-        if [ $? -ne "0" ]; then
-            backup_printError "Error creating target directory: ${BACKUP_TARGET_DIR}"
-            return 1
-        fi
-    fi
-
-    backup_printInfo "Title: ${TAG_TITLE}"
-    backup_printInfo "Target Directory: ${BACKUP_TARGET_DIR}"
     return 0
 }
 
 backup_runPreSection()
 {
+    if [ -z ${BACKUP_PROFILE} ]; then
+        backup_printError "No backup profile specified! Use --profile <file.conf> to specify."        
+        return 1
+    fi
+
+    # Make sure that the backup path exists.
+    # If $PROFILE_DEST_HOST is empty, assume this is a local backup.
+    if [ -z "${PROFILE_DEST_HOST}" ]; then
+        ${MKDIR} -p "${PROFILE_DEST_PATH}"
+        BACKUP_IS_LOCAL=1
+        BACKUP_DEST_PATH_INFO=${PROFILE_DEST_PATH}@localhost
+    else
+        sftp "${PROFILE_DEST_HOST}" <<EOF
+mkdir $PROFILE_DEST_PATH
+EOF
+        BACKUP_DEST_PATH_INFO=${PROFILE_DEST_PATH}@$PROFILE_DEST_HOST
+    fi
+
+    ## @todo Try to filter out sensitive information from BACKUP_DEST_PATH_INFO!
+
+    if [ $? -eq "1" ]; then
+        backup_printError "Unable to create backup at: ${BACKUP_DEST_PATH_INFO}"
+        return 1
+    fi        
+
     backup_printInfo "Backup started: `$DATE`"
     TIME_START=$(${DATE} +%s)
     return 0
@@ -177,11 +171,11 @@ backup_runPostSection()
     else
         backup_printInfo "Backup took ${TIME_DIFF_MINS} minute(s)"
     fi
-    return 0
-}
 
-backup_Uninit()
-{
+    return 0
+
+    ## @todo The stuff below needs more testing first.
+
     # Do *not* delete directories!
 
     # Save installed software packages
@@ -218,12 +212,6 @@ backup_Uninit()
         backup_printInfo "No log file ${BACKUP_LOG_FILE_SRC} created, skipping"
     fi
 
-    # Close zenity file descriptor to let the
-    # notification icon end.
-    if [ -e "${ZENITY}" ]; then
-        exec 3>&-
-    fi
-
     #
     # At this point no more logging will be available!
     # See block above to know why ...
@@ -236,13 +224,57 @@ backup_Uninit()
         return 1
     fi
 
+    return 0
+}
+
+backup_SetProfile()
+{
+    BACKUP_PROFILE="$1"
+
+    #
+    # Try loading the backup file.
+    #
+    if [ ! -f "${BACKUP_PROFILE}" ]; then
+        BACKUP_PROFILE=${SCRIPT_PROFILE_FILE}
+        if [ ! -f "${BACKUP_PROFILE}" ]; then
+            backup_printInfo "Profile \"${BACKUP_PROFILE}\" not found, exiting"
+            exit 1
+        fi
+    fi
+
+    backup_printInfo "Using profile: ${BACKUP_PROFILE}"
+    source ${BACKUP_PROFILE}
+
+    #
+    # A bit of profile sanity checking.
+    ## @todo Extend this.
+    #
+    if [ -z "${PROFILE_DEST_PATH}" ]; then
+        backup_printError "No target directory in profile specified!"
+        return 1
+    fi
+
+    backup_printInfo "Title: ${BACKUP_TAG_TITLE}"
+    backup_printInfo "Target Directory: ${PROFILE_DEST_HOST}${PROFILE_DEST_PATH}"
+
+    return 0
+}
+
+backup_Uninit()
+{
+    # Close zenity file descriptor to let the
+    # notification icon end.
+    if [ -e "${ZENITY}" ]; then
+        exec 3>&-
+    fi
+
     backup_Unmount
     return 0
 }
 
 backup_printError()
 {
-    # TODO: Add --silent switch for not showing zenity stuff.
+    ## @ŧodo Add --silent switch for not showing zenity stuff.
     if [ -e "${ZENITY}" ]; then
         DISPLAY=:0 ${ZENITY} --error --title "Backup Error - `${DATE}`" --text="Error: $1" --display=:0.0
     fi
@@ -254,7 +286,7 @@ backup_printInfo()
 {
     ${ECHO} "$1"
 
-    # TODO: Add --silent switch for not showing zenity stuff.
+    ## @todo Add --silent switch for not showing zenity stuff.
     if [ -e "${ZENITY}" ]; then
         # Note: "tooltip" prefix needs to be there for zenity to
         #       interpret stuff.
@@ -275,4 +307,3 @@ backup_showLogTrace()
 
     return 0
 }
-

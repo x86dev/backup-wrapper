@@ -23,12 +23,6 @@ RDIFF_BACKUP_CHECK_OPTS="
     --verify"
 
 RDIFF_CMD_INCLUDE="--include"
-# This include *will* match everything in /home/johndoe, regardless
-# whether something like /home/johndoe/foo was specified in the exclude
-# string -- include always has precedence over exclude!
-RDIFF_INCLUDE="
-    ${RDIFF_CMD_INCLUDE} /home/johndoe"
-
 RDIFF_CMD_EXCLUDE_COMPRESSION="--no-compression-regexp"
 RDIFF_CMD_EXCLUDE="--exclude"
 
@@ -70,28 +64,21 @@ plugin_PreInit()
 
 rdiff_initCommon()
 {
-    if [ -z "${BACKUP_DIRS}" ]; then
-        backup_printError "rdiff-backup: No directories to backup specified!"
-        return 1
+    if [ -n ${BACKUP_IS_LOCAL} ]; then
+        RDIFF_TMP_DIR=`${MKTEMP} -d -p ${PROFILE_DEST_PATH} rdiff-tmp-XXX`
+        if [ $? -ne "0" ]; then
+            backup_printInfo "rdiff-backup: Could not create temporary directory!"
+            return 1
+        fi       
+        
+        backup_printInfo "rdiff-backup: Using temporary directory: ${RDIFF_TMP_DIR}"
+        RDIFF_OPTS_TMP_DIR="--tempdir=${RDIFF_TMP_DIR}"
+ 
+        RDIFF_DEST_PATH=${PROFILE_DEST_PATH}
+    else        
+        RDIFF_DEST_PATH=${PROFILE_DEST_HOST}::${PROFILE_DEST_PATH}
     fi
-    if [ -z "${BACKUP_TARGET_DIR}" ]; then
-        backup_printError "rdiff-backup: No target directory specified!"
-        return 1
-    fi
-
-    RDIFF_TARGET_FILE_LOG=${BACKUP_SPEC_FILE}.log
-    RDIFF_TARGET_FILE_PKG=${BACKUP_SPEC_FILE}_pkg.log
-
-    RDIFF_TMP_DIR=`${MKTEMP} -d -p ${BACKUP_SPEC_DIR} rdiff-tmp-XXX`
-    if [ $? -ne "0" ]; then
-        backup_printInfo "rdiff-backup: Could not create temporary directory!"
-        return 1
-    fi
-    backup_printInfo "rdiff-backup: Using temporary directory: ${RDIFF_TMP_DIR}"
-
-    RDIFF_OPTS_TMP_DIR="
-        --tempdir=${RDIFF_TMP_DIR}"
-
+  
     # Set defaults.
     RDIFF_EXCLUDE="
         --exclude-special-files
@@ -132,7 +119,24 @@ plugin_DoBackup()
 {
     backup_printInfo "rdiff-backup: Performing backup to: ${BACKUP_SPEC_DIR}"
 
-    ${RDIFF_BACKUP} ${RDIFF_BACKUP_OPTS} ${RDIFF_OPTS_TMP_DIR} ${RDIFF_EXCLUDE} ${RDIFF_INCLUDE} ${BACKUP_SPEC_DIR}
+    # This include *will* match everything in /home/johndoe, regardless
+    # whether something like /home/johndoe/foo was specified in the exclude
+    # string -- include always has precedence over exclude!
+    RDIFF_INCLUDE=
+    for CUR_ENTRY in ${PROFILE_INCLUDE}
+    do
+        RDIFF_INCLUDE="${RDIFF_INCLUDE} ${RDIFF_CMD_INCLUDE} ${CUR_ENTRY}"
+    done
+
+    RDIFF_EXCLUDE=
+    for CUR_ENTRY in ${PROFILE_EXCLUDE}
+    do
+        RDIFF_EXCLUDE="${RDIFF_EXCLUDE} ${RDIFF_CMD_EXCLUDE} ${CUR_ENTRY}"
+    done
+
+    # Finally do the actual backup.
+    ${RDIFF_BACKUP} ${RDIFF_BACKUP_OPTS} ${RDIFF_OPTS_TMP_DIR} ${RDIFF_EXCLUDE} ${RDIFF_INCLUDE} \
+        ${PROFILE_SRC_PATH} ${RDIFF_DEST_PATH} 
 
     return $?
 }
@@ -146,7 +150,7 @@ plugin_DoCheck()
     backup_printInfo "rdiff-backup: Checking backup is disabled"
     return 0
 
-    #${RDIFF_BACKUP} ${RDIFF_BACKUP_CHECK_OPTS} ${BACKUP_SPEC_DIR}
+    #${RDIFF_BACKUP} ${RDIFF_BACKUP_CHECK_OPTS} ${RDIFF_DEST_PATH}
     #if [ $? -eq "0" ]; then
     #    backup_printInfo "rdiff-backup: Check successful!"
     #fi
@@ -182,4 +186,3 @@ plugin_Shutdown()
 
     return 0
 }
-

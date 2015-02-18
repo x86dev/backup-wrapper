@@ -5,10 +5,8 @@ CUR_DIR=$(cd `dirname $0` && pwd)
 . ${CUR_DIR}/backup_header.sh
 # @todo Iterate over plugins automatically!
 #. $CUR_DIR/backup_plugin_bar.sh
+#. $CUR_DIR/backup_plugin_obnam.sh
 . ${CUR_DIR}/backup_plugin_rdiff-backup.sh
-
-# Command line arguments
-CMDLINE_ARG0=$1
 
 if [ $PLUGIN_API_VER -ne "1" ]; then
     backup_printError "Invalid API version of plugin!"
@@ -23,28 +21,38 @@ else
     if [ $? -ne "0" ]; then
         backup_printError "Error while initializing plugin!"
     else
-        case "${CMDLINE_ARG0}" in
-            mount)
-                backup_printInfo "Mounting ..."
-                exit ; Hack: Skip uninit
-                ;;
-            monthly) # This script must be run every 28 days
-                backup_printInfo "Monthly schedule selected"
-                plugin_InitMonthly
-                ;;
-            weekly) # This script must be run every 7 days
-                backup_printInfo "Weekly schedule selected"
-                plugin_InitWeekly
-                ;;
-            debug) # Debug mode
-                backup_printInfo "Debug schedule selected"
-                plugin_InitDebug
-                ;;
-            daily|*) # This script must be run every day
-                backup_printInfo "Daily schedule selected"
-                plugin_InitDaily
-                ;;
-        esac
+        while [ $# != 0 ]; do
+            CUR_PARM="$1"
+            shift
+            case "$CUR_PARM" in
+                mount)
+                    backup_printInfo "Mounting ..."
+                    exit ; Hack: Skip uninit
+                    ;;
+                monthly) # This script must be run every 28 days
+                    backup_printInfo "Monthly schedule selected"
+                    plugin_InitMonthly
+                    ;;
+                weekly) # This script must be run every 7 days
+                    backup_printInfo "Weekly schedule selected"
+                    plugin_InitWeekly
+                    ;;
+                debug) # Debug mode
+                    backup_printInfo "Debug schedule selected"
+                    plugin_InitDebug
+                    ;;
+                --profile)
+                    backup_SetProfile "$1"
+                    ;;                    
+                daily|*) # This script must be run every day
+                    backup_printInfo "Daily schedule selected"
+                    plugin_InitDaily
+                    ;;
+            esac
+            if [ $? -ne "0" ]; then
+                backup_printError "Error handling command line argument!"
+            fi
+        done
 
         if [ $? -eq "0" ]; then
             backup_runPreSection
@@ -74,8 +82,6 @@ else
                     backup_showLogTrace
                 fi
             fi # Pre section
-        else
-            backup_printError "Error initializing specific plugin task!"
         fi # Plugin init successful?
 
         plugin_Shutdown
@@ -85,4 +91,3 @@ else
     fi # Plugin pre init
     backup_Uninit # Skip return value
 fi # Backup init
-
