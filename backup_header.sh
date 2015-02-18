@@ -36,7 +36,7 @@ BACKUP_TAG_FILE=`${DATE} +%y%m%d_%H%M%S`
 BACKUP_TAG_TITLE="${BACKUP_TAG_HOSTNAME} - ${BACKUP_TAG_KERNEL}"
 
 # Enable the following line for debugging
-set -x
+#set -x
 
 isRoot()
 {
